@@ -33,6 +33,9 @@ import io.oasp.module.test.common.base.ComponentTest;
 @WebAppConfiguration
 public class OfferManagementTest extends ComponentTest {
 
+  /**
+   *
+   */
   @Inject
   private Offermanagement offerManagement;
 
