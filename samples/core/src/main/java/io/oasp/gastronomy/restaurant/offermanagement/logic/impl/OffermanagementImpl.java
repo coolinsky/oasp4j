@@ -1,19 +1,42 @@
 package io.oasp.gastronomy.restaurant.offermanagement.logic.impl;
 
+import java.sql.Blob;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+
+import javax.annotation.security.RolesAllowed;
+import javax.inject.Inject;
+import javax.inject.Named;
+import javax.transaction.Transactional;
+import javax.validation.Valid;
+
+import net.sf.mmm.util.exception.api.ObjectMismatchException;
+import net.sf.mmm.util.exception.api.ObjectNotFoundException;
+import net.sf.mmm.util.exception.api.ObjectNotFoundUserException;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.oasp.gastronomy.restaurant.general.common.api.constants.PermissionConstants;
+import io.oasp.gastronomy.restaurant.general.common.api.datatype.Money;
 import io.oasp.gastronomy.restaurant.general.logic.api.to.BinaryObjectEto;
 import io.oasp.gastronomy.restaurant.general.logic.base.AbstractComponentFacade;
 import io.oasp.gastronomy.restaurant.general.logic.base.UcManageBinaryObject;
 import io.oasp.gastronomy.restaurant.offermanagement.common.api.Product;
+import io.oasp.gastronomy.restaurant.offermanagement.common.api.Special;
 import io.oasp.gastronomy.restaurant.offermanagement.common.api.datatype.ProductType;
 import io.oasp.gastronomy.restaurant.offermanagement.common.api.exception.OfferEmptyException;
+import io.oasp.gastronomy.restaurant.offermanagement.dataaccess.api.DrinkEntity;
 import io.oasp.gastronomy.restaurant.offermanagement.dataaccess.api.OfferEntity;
 import io.oasp.gastronomy.restaurant.offermanagement.dataaccess.api.ProductEntity;
+import io.oasp.gastronomy.restaurant.offermanagement.dataaccess.api.SpecialEntity;
 import io.oasp.gastronomy.restaurant.offermanagement.dataaccess.api.dao.DrinkDao;
 import io.oasp.gastronomy.restaurant.offermanagement.dataaccess.api.dao.MealDao;
 import io.oasp.gastronomy.restaurant.offermanagement.dataaccess.api.dao.OfferDao;
 import io.oasp.gastronomy.restaurant.offermanagement.dataaccess.api.dao.ProductDao;
 import io.oasp.gastronomy.restaurant.offermanagement.dataaccess.api.dao.SideDishDao;
+import io.oasp.gastronomy.restaurant.offermanagement.dataaccess.api.dao.SpecialDao;
 import io.oasp.gastronomy.restaurant.offermanagement.logic.api.Offermanagement;
 import io.oasp.gastronomy.restaurant.offermanagement.logic.api.to.DrinkEto;
 import io.oasp.gastronomy.restaurant.offermanagement.logic.api.to.MealEto;
@@ -27,24 +50,10 @@ import io.oasp.gastronomy.restaurant.offermanagement.logic.api.to.ProductFilter;
 import io.oasp.gastronomy.restaurant.offermanagement.logic.api.to.ProductSearchCriteriaTo;
 import io.oasp.gastronomy.restaurant.offermanagement.logic.api.to.ProductSortBy;
 import io.oasp.gastronomy.restaurant.offermanagement.logic.api.to.SideDishEto;
+import io.oasp.gastronomy.restaurant.offermanagement.logic.api.to.SpecialEto;
+import io.oasp.gastronomy.restaurant.offermanagement.logic.api.to.SpecialSearchCriteriaTo;
 import io.oasp.module.jpa.common.api.to.PaginatedListTo;
-
-import java.sql.Blob;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Objects;
-
-import javax.annotation.security.RolesAllowed;
-import javax.inject.Inject;
-import javax.inject.Named;
-import javax.transaction.Transactional;
-import javax.validation.Valid;
-
-import net.sf.mmm.util.exception.api.ObjectMismatchException;
-import net.sf.mmm.util.exception.api.ObjectNotFoundUserException;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import io.oasp.module.jpa.dataaccess.api.GenericDao;
 
 /**
  * Implementation class for {@link Offermanagement}.
@@ -55,6 +64,8 @@ import org.slf4j.LoggerFactory;
 public class OffermanagementImpl extends AbstractComponentFacade implements Offermanagement {
 
   private static final Logger LOG = LoggerFactory.getLogger(OffermanagementImpl.class);
+
+  private SpecialDao specialDao;
 
   /** @see #getOfferDao() */
   private OfferDao offerDao;
@@ -211,10 +222,19 @@ public class OffermanagementImpl extends AbstractComponentFacade implements Offe
   }
 
   @Override
-  @RolesAllowed(PermissionConstants.DELETE_OFFER)
-  public void deleteOffer(Long offerId) {
+  @RolesAllowed(PermissionConstants.SAVE_OFFER)
+  public SpecialEto saveSpecial(@Valid SpecialEto special) {
 
-    getOfferDao().delete(offerId);
+    Objects.requireNonNull(special, "special");
+
+    if ((special.getName() == null) || (special.getOfferId() == 0) || (special.getSpecialPrice().equals(0))) {
+      LOG.error("Problem with special. Some fields may be null");
+      return null;
+      // TODO: implement and throw new SpecialEmptyException
+    } else {
+      SpecialEntity persistedSpecial = getSpecialDao().save(getBeanMapper().map(special, SpecialEntity.class));
+      return getBeanMapper().map(persistedSpecial, SpecialEto.class);
+    }
   }
 
   @Override
@@ -375,21 +395,6 @@ public class OffermanagementImpl extends AbstractComponentFacade implements Offe
   }
 
   @Override
-  @RolesAllowed(PermissionConstants.SAVE_PRODUCT_PICTURE)
-  public void updateProductPicture(Long productId, Blob blob, BinaryObjectEto binaryObjectEto) {
-
-    ProductEntity product = getProductDao().findOne(productId);
-    if (product != null) {
-      binaryObjectEto = getUcManageBinaryObject().saveBinaryObject(blob, binaryObjectEto);
-      product.setPictureId(binaryObjectEto.getId());
-      getProductDao().save(product);
-    } else {
-      throw new ObjectNotFoundUserException(Product.class, productId);
-    }
-
-  }
-
-  @Override
   @RolesAllowed(PermissionConstants.DELETE_PRODUCT_PICTURE)
   public void deleteProductPicture(Long productId) {
 
@@ -405,7 +410,25 @@ public class OffermanagementImpl extends AbstractComponentFacade implements Offe
 
     criteria.limitMaximumPageSize(MAXIMUM_HIT_LIMIT);
     PaginatedListTo<OfferEntity> offers = getOfferDao().findOffers(criteria);
+    for (OfferEntity offer : offers.getResult()) {
+      Money special = findBestSpecialOfferForNow(offer.getNumber());
+    }
+
     return mapPaginatedEntityList(offers, OfferEto.class);
+  }
+
+  /**
+   * @param number
+   * @return
+   */
+  private Money findBestSpecialOfferForNow(Long number) {
+
+    SpecialEntity special = new SpecialEntity();
+    SpecialSearchCriteriaTo bestOffer = new SpecialSearchCriteriaTo();
+    bestOffer.
+
+    findBestActiveSpecial
+    return null;
   }
 
   @Override
@@ -462,6 +485,14 @@ public class OffermanagementImpl extends AbstractComponentFacade implements Offe
   }
 
   /**
+   * @return specialDao
+   */
+  private SpecialDao getSpecialDao() {
+
+    return this.specialDao;
+  }
+
+  /**
    * Sets the field 'productDao'.
    *
    * @param productDao New value for productDao
@@ -497,6 +528,55 @@ public class OffermanagementImpl extends AbstractComponentFacade implements Offe
   public void setSideDishDao(SideDishDao sideDishDao) {
 
     this.sideDishDao = sideDishDao;
+  }
+
+  /**
+   * @param specialDao new value of {@link #getspecialDao}.
+   */
+  @Inject
+  public void setSpecialDao(SpecialDao specialDao) {
+
+    this.specialDao = specialDao;
+  }
+
+  @Override
+  @RolesAllowed(PermissionConstants.DELETE_OFFER)
+  public void deleteOffer(Long offerId) {
+
+    getOfferDao().delete(offerId);
+  }
+
+  @Override
+  public void deleteSpecial(Long productId) {
+
+    getSpecialDao().delete(productId);
+  }
+
+  @Override
+  @RolesAllowed(PermissionConstants.SAVE_PRODUCT_PICTURE)
+  public void updateProductPicture(Long productId, Blob blob, BinaryObjectEto binaryObjectEto) {
+
+    ProductEntity product = getProductDao().findOne(productId);
+    if (product != null) {
+      binaryObjectEto = getUcManageBinaryObject().saveBinaryObject(blob, binaryObjectEto);
+      product.setPictureId(binaryObjectEto.getId());
+      getProductDao().save(product);
+    } else {
+      throw new ObjectNotFoundUserException(Product.class, productId);
+    }
+
+  }
+
+  @Override
+  public void updateSpecialPrice(Long offerId, Money newSpecialPrice) {
+
+    SpecialEntity special = getSpecialDao().findOne(offerId);
+    if (special != null) {
+      special.setSpecialPrice(newSpecialPrice);
+      getSpecialDao().save(special);
+    } else {
+      throw new ObjectNotFoundException(Special.class, offerId);
+    }
   }
 
 }
